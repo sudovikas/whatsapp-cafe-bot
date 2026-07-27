@@ -1,0 +1,10 @@
+WHATSAPP_TOKEN=your_meta_permanent_or_temp_token
+WHATSAPP_PHONE_NUMBER_ID=your_phone_number_id
+WHATSAPP_VERIFY_TOKEN=any_random_string_you_choose
+OWNER_WHATSAPP_NUMBER=918052937561
+GROQ_API_KEY=your_free_groq_api_key_from_console.groq.com
+GOOGLE_SHEETS_CLIENT_EMAIL=your-service-account@project.iam.gserviceaccount.com
+GOOGLE_SHEETS_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nXXXX\n-----END PRIVATE KEY-----\n"
+GOOGLE_SHEET_ID=your_google_sheet_id_from_url
+PORT=3000
+BASE_URL=https://your-app.onrender.com

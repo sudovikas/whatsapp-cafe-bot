@@ -1,0 +1,1 @@
+Place your cafe's UPI QR code image here as 'upi-qr.jpg'. This can be a screenshot of your GPay/PhonePe/Paytm QR code, or the QR generated in your bank's UPI app.
