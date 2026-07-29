@@ -11,15 +11,20 @@ const MODEL = 'llama-3.1-8b-instant'; // fast + free tier friendly
 
 const SYSTEM_PROMPT = `You are Bee, the friendly, witty receptionist at Beeburg Cafe ("Slice of Happiness") in Varanasi.
 You're chatting with a customer on WhatsApp. Be warm, a little playful, use 1 emoji max per message, keep replies SHORT
-(1-3 sentences), and sound like a real person, not a corporate bot. Never invent menu items or prices - the actual menu
-images are sent separately. Never invent order IDs, payment status, or confirm payments yourself - that's handled by
+(1-3 sentences), and sound like a real person, not a corporate bot.
+Only mention menu items from the provided list. If asked about something not on the list, say it's not available and suggest checking the menu.
+Never invent menu items or prices. Never invent order IDs, payment status, or confirm payments yourself - that's handled by
 the cafe owner. If asked something you don't know, be honest and warmly redirect them to type "menu" or ask the owner.`;
 
-async function chat(userMessage, contextHint) {
+async function chat(userMessage, contextHint, history = [], menuList = []) {
   try {
+    const menuText = menuList.map(item => `- ${item.item} (${item.category}): Rs. ${item.price}`).join('\n');
+    const systemPromptWithMenu = `${SYSTEM_PROMPT}\n\nAvailable Menu:\n${menuText}`;
+
     const messages = [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: systemPromptWithMenu },
       { role: 'system', content: `Context: ${contextHint}` },
+      ...history,
       { role: 'user', content: userMessage },
     ];
     const res = await axios.post(
@@ -35,3 +40,4 @@ async function chat(userMessage, contextHint) {
 }
 
 module.exports = { chat };
+

@@ -25,10 +25,37 @@ function nextOrderId() {
   return `BB${orderCounter}`;
 }
 
+const MENU_LIST = [
+  { category: "Pizza", item: "Margherita Pizza", price: 199 },
+  { category: "Pizza", item: "Double Cheese Margherita", price: 249 },
+  { category: "Pizza", item: "Veggie Supreme Pizza", price: 299 },
+  { category: "Burger", item: "Veggie Burger", price: 99 },
+  { category: "Burger", item: "Cheese Burger", price: 129 },
+  { category: "Burger", item: "Chicken Burger", price: 149 },
+  { category: "Coffee", item: "Classic Cold Coffee", price: 89 },
+  { category: "Coffee", item: "Hot Latte", price: 109 },
+  { category: "Beverages", item: "Masala Chai", price: 29 },
+  { category: "Beverages", item: "Mineral Water", price: 20 }
+];
+
 // Wrapper: try AI reply first, fall back to a plain static message if AI is unavailable.
+// Also manages session conversation history (rolling summary of last 4 exchanges).
 async function sendChatOrFallback(phone, userMessage, contextHint, fallbackText) {
-  const aiReply = await chat(userMessage, contextHint);
-  return sendText(phone, aiReply || fallbackText);
+  const session = getSession(phone);
+  const history = session.history || [];
+
+  const aiReply = await chat(userMessage, contextHint, history, MENU_LIST);
+  const replyText = aiReply || fallbackText;
+
+  // Save to rolling summary history
+  history.push({ role: 'user', content: userMessage });
+  history.push({ role: 'assistant', content: replyText });
+  if (history.length > 8) { // Keep last 4 exchanges (8 messages total)
+    history.splice(0, 2);
+  }
+  session.history = history;
+
+  return sendText(phone, replyText);
 }
 
 // ---------- Meta webhook verification ----------
@@ -63,6 +90,9 @@ app.post('/webhook', async (req, res) => {
       if (interactive.type === 'button_reply') userInput = interactive.button_reply.id;
     }
 
+    // Verbose logging for webhook debugging
+    console.log(`[Webhook Received] From: ${phone} (${name}), Type: ${message.type}, Input: "${userInput}"`);
+
     if (OWNER_PHONE && phone === OWNER_PHONE) {
       return handleOwnerMessage(phone, userInput);
     }
@@ -78,6 +108,40 @@ async function handleMessage(phone, name, input) {
   const session = getSession(phone);
   session.name = name;
   const lower = (input || '').toLowerCase();
+
+  // 1. Order details bypass check (grounding / no hallucination)
+  const isOrderQuery = lower.includes('my order') || 
+                       lower.includes('what did i order') || 
+                       lower.includes('order detail') || 
+                       lower.includes('what is my order') || 
+                       lower.includes('order summary') || 
+                       lower.includes("what's in my order");
+  
+  if (isOrderQuery) {
+    if (session.orderText) {
+      let detailsMsg = `Here is your current order:\n\n${session.orderText}`;
+      if (session.orderId) {
+        detailsMsg += `\n\nOrder ID: ${session.orderId}`;
+      }
+      if (session.paymentMethod) {
+        detailsMsg += `\nPayment Method: ${session.paymentMethod}`;
+      }
+      return sendText(phone, detailsMsg);
+    } else {
+      return sendText(phone, "You don't have an active order right now. Type 'menu' to start one!");
+    }
+  }
+
+  // 2. Cash on Delivery (COD) detection
+  const isCodQuery = lower.includes('cod') || 
+                     lower.includes('cash on delivery') || 
+                     lower.includes('pay cash') || 
+                     lower.includes('delivery cash') || 
+                     lower.includes('pay on delivery');
+                     
+  if (isCodQuery && (session.step === 'CONFIRM' || session.step === 'AWAITING_PAYMENT')) {
+    return handleCodSelection(phone, session);
+  }
 
   if (lower === 'menu' || lower === 'hi' || lower === 'hello' || lower === 'start') {
     return sendMenu(phone, session, lower === 'menu' ? 'menu request' : 'greeting');
@@ -99,14 +163,25 @@ async function handleMessage(phone, name, input) {
       return handleConfirmAction(phone, name, input, session);
     case 'AWAITING_PAYMENT':
       return handlePaymentWait(phone, input, session);
+    case 'AWAITING_DELIVERY':
+      // General chat while waiting for delivery
+      return sendChatOrFallback(
+        phone, input,
+        `Customer is chatting while waiting for their COD order ${session.orderId} to be delivered. Remind them warmly their order is in preparation.`,
+        "We are preparing your order! We will collect cash on delivery."
+      );
     default:
       return sendFallback(phone, input);
   }
 }
 
 async function sendMenu(phone, session, occasion) {
+  const isExplicitMenuRequest = occasion === 'menu request';
+  const wasMenuSent = session.menuSent;
+
   resetSession(phone);
-  getSession(phone).step = 'AWAITING_ORDER';
+  const newSession = getSession(phone);
+  newSession.step = 'AWAITING_ORDER';
 
   await sendChatOrFallback(
     phone,
@@ -115,8 +190,13 @@ async function sendMenu(phone, session, occasion) {
     "Hey there! Welcome to Beeburg Cafe. Sending you our menu now."
   );
 
-  await sendImage(phone, `${BASE_URL}/public/menu-pizza.jpg`, 'Beeburg Cafe Menu (1/2)');
-  await sendImage(phone, `${BASE_URL}/public/menu-burger.jpg`, 'Beeburg Cafe Menu (2/2)');
+  // Avoid resending the full menu images if already received in this session, unless explicitly requested
+  if (!wasMenuSent || isExplicitMenuRequest) {
+    await sendImage(phone, `${BASE_URL}/public/menu-pizza.jpg`, 'Beeburg Cafe Menu (1/2)');
+    await sendImage(phone, `${BASE_URL}/public/menu-burger.jpg`, 'Beeburg Cafe Menu (2/2)');
+    newSession.menuSent = true;
+  }
+
   await sendText(
     phone,
     'Just reply with what you\'d like to order (item + quantity), e.g.:\n"1 Margherita Pizza Medium, 2 Classic Cold Coffee"'
@@ -165,7 +245,7 @@ async function finalizeOrder(phone, name, session) {
   const orderText = session.orderText;
   const orderId = nextOrderId();
 
-  pendingOrders[orderId] = { phone, name, orderText };
+  pendingOrders[orderId] = { phone, name, orderText, paymentMethod: 'UPI' };
 
   await sendImage(
     phone, `${BASE_URL}/public/upi-qr.jpg`,
@@ -180,11 +260,38 @@ async function finalizeOrder(phone, name, session) {
 
   session.step = 'AWAITING_PAYMENT';
   session.orderId = orderId;
+  session.paymentMethod = 'UPI';
+  session.lastReminderAt = Date.now();
+  session.msgsSinceReminder = 0;
 
   if (OWNER_PHONE) {
     await sendText(
       OWNER_PHONE,
       `New order ${orderId}\nCustomer: ${name} (${phone})\nOrder:\n${orderText}\n\nOnce you see the payment in your UPI app, reply here with:\nconfirm ${orderId}`
+    );
+  }
+}
+
+async function handleCodSelection(phone, session) {
+  session.paymentMethod = 'COD';
+  session.step = 'AWAITING_DELIVERY';
+
+  const orderId = session.orderId || nextOrderId();
+  session.orderId = orderId;
+
+  pendingOrders[orderId] = { phone, name: session.name, orderText: session.orderText, paymentMethod: 'COD' };
+
+  await sendChatOrFallback(
+    phone,
+    "cash on delivery",
+    `Customer chose Cash on Delivery for order ${orderId}. Playfully confirm and tell them we'll collect cash on delivery, and our kitchen is preparing it.`,
+    `Awesome choice! We've noted Cash on Delivery (COD) for your order ${orderId}. Our kitchen is starting to prepare it now, and we'll collect payment on delivery!`
+  );
+
+  if (OWNER_PHONE) {
+    await sendText(
+      OWNER_PHONE,
+      `New COD Order ${orderId}\nCustomer: ${session.name} (${phone})\nOrder:\n${session.orderText}\n\nThis is a Cash on Delivery order. Collect cash on delivery. Reply here when ready:\nready ${orderId} ${phone}`
     );
   }
 }
@@ -198,11 +305,46 @@ async function handlePaymentWait(phone, input, session) {
       `Thanks! We're verifying your payment for order ${session.orderId}. You'll get a confirmation message here shortly.`
     );
   }
-  return sendChatOrFallback(
-    phone, input,
-    `Customer sent a message while we're still waiting on their payment confirmation for order ${session.orderId}. Gently remind them to pay and reply "paid".`,
-    `Still waiting on payment confirmation for order ${session.orderId}. Reply "paid" once you've completed the UPI payment.`
+
+  // Handle general questions/chat instead of nagging immediately
+  const aiReply = await chat(
+    input,
+    `Customer sent a message while we're still waiting on their payment confirmation for order ${session.orderId}. Answer their question/chat.`,
+    session.history || [],
+    MENU_LIST
   );
+  const replyText = aiReply || `I got your message!`;
+
+  // Update session history
+  const history = session.history || [];
+  history.push({ role: 'user', content: input });
+  history.push({ role: 'assistant', content: replyText });
+  if (history.length > 8) history.splice(0, 2);
+  session.history = history;
+
+  // Decide if we should append the payment reminder (only if >5 min or >= 2 messages since last reminder)
+  const now = Date.now();
+  const timeSinceLast = now - (session.lastReminderAt || 0);
+  const msgsSinceLast = session.msgsSinceReminder || 0;
+
+  let finalReply = replyText;
+  if (timeSinceLast > 5 * 60 * 1000 || msgsSinceLast >= 2) {
+    const reminders = [
+      `Once you've completed the UPI payment, please reply "paid" so we can start preparing order ${session.orderId}.`,
+      `Just a quick reminder: please reply "paid" after scanning the QR code above to confirm order ${session.orderId}.`,
+      `We're ready to start on your order ${session.orderId}! Just scan the QR code above and reply "paid" when done.`
+    ];
+    // Vary the phrasing
+    const reminderText = reminders[Math.floor(Math.random() * reminders.length)];
+    finalReply = `${replyText}\n\n${reminderText}`;
+    
+    session.lastReminderAt = now;
+    session.msgsSinceReminder = 0;
+  } else {
+    session.msgsSinceReminder = msgsSinceLast + 1;
+  }
+
+  return sendText(phone, finalReply);
 }
 
 async function sendFallback(phone, input) {
