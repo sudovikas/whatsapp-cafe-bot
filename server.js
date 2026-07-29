@@ -8,6 +8,7 @@ const express = require('express');
 const { sendText, sendImage, sendButtons } = require('./services/whatsapp');
 const { getSession, resetSession } = require('./services/state');
 const { chat } = require('./services/ai');
+const { readOrders, saveOrder, updateOrderStatus } = require('./services/db');
 
 const app = express();
 app.use(express.json());
@@ -247,6 +248,16 @@ async function finalizeOrder(phone, name, session) {
 
   pendingOrders[orderId] = { phone, name, orderText, paymentMethod: 'UPI' };
 
+  // Log order to persistent database
+  saveOrder({
+    orderId,
+    phone,
+    name,
+    orderText,
+    paymentMethod: 'UPI',
+    status: 'Pending Payment'
+  });
+
   await sendImage(
     phone, `${BASE_URL}/public/upi-qr.jpg`,
     `Order ${orderId} - Scan to pay via any UPI app (GPay/PhonePe/Paytm)`
@@ -280,6 +291,16 @@ async function handleCodSelection(phone, session) {
   session.orderId = orderId;
 
   pendingOrders[orderId] = { phone, name: session.name, orderText: session.orderText, paymentMethod: 'COD' };
+
+  // Log COD order to persistent database
+  saveOrder({
+    orderId,
+    phone,
+    name: session.name,
+    orderText: session.orderText,
+    paymentMethod: 'COD',
+    status: 'Awaiting Delivery'
+  });
 
   await sendChatOrFallback(
     phone,
@@ -363,7 +384,11 @@ async function handleOwnerMessage(ownerPhone, input) {
   if (confirmMatch) {
     const orderId = confirmMatch[1].toUpperCase();
     const order = pendingOrders[orderId];
-    if (!order) return sendText(ownerPhone, `No pending order found with ID ${orderId}.`);
+    
+    // Update state in database even if deleted from local pending memory
+    updateOrderStatus(orderId, { status: 'Paid' });
+
+    if (!order) return sendText(ownerPhone, `Confirmed payment for order ${orderId} in database, but customer session was inactive.`);
 
     await sendText(
       order.phone,
@@ -377,15 +402,192 @@ async function handleOwnerMessage(ownerPhone, input) {
   const readyMatch = text.match(/^ready\s+(\w+)\s+(\d+)/i);
   if (readyMatch) {
     const [, orderId, customerPhone] = readyMatch;
+    
+    updateOrderStatus(orderId.toUpperCase(), { status: 'Ready' });
+
     await sendText(customerPhone, `Your order ${orderId.toUpperCase()} is ready for pickup! See you soon.`);
-    return sendText(ownerPhone, `Ready notification sent to ${customerPhone}.`);
+    return sendText(ownerPhone, `Ready notification sent to ${customerPhone} and updated in DB.`);
+  }
+
+  const deliveredMatch = text.match(/^delivered\s+(\w+)\s+(\d+)/i);
+  if (deliveredMatch) {
+    const [, orderId, customerPhone] = deliveredMatch;
+
+    updateOrderStatus(orderId.toUpperCase(), { status: 'Delivered' });
+
+    await sendText(customerPhone, `Your order ${orderId.toUpperCase()} has been successfully delivered! Hope you enjoy it. 😊`);
+    return sendText(ownerPhone, `Order ${orderId.toUpperCase()} marked as Delivered.`);
+  }
+
+  // Owner commands to fetch orders (orders or orders today)
+  const ordersMatch = text.match(/^orders\s*(today)?/i);
+  if (ordersMatch) {
+    const todayOnly = !!ordersMatch[1];
+    const allOrders = readOrders();
+    
+    let filtered = allOrders;
+    if (todayOnly) {
+      const todayStr = new Date().toISOString().split('T')[0];
+      filtered = allOrders.filter(o => o.timestamp.startsWith(todayStr));
+    }
+    
+    if (filtered.length === 0) {
+      return sendText(ownerPhone, `No orders found ${todayOnly ? 'today' : 'yet'}.`);
+    }
+    
+    const formatted = filtered.slice(-10).map(o => { // Send last 10 orders to prevent text overflow
+      const time = new Date(o.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return `📦 *${o.orderId}* (${time})\n👤 ${o.name} (${o.phone})\n🍕 ${o.orderText}\n💵 Method: ${o.paymentMethod} | Status: ${o.status}`;
+    }).join('\n\n');
+    
+    return sendText(ownerPhone, `Recent Orders List (Max 10):\n\n${formatted}`);
   }
 
   return sendText(
     ownerPhone,
-    'Admin commands:\n- confirm <orderId>  -> mark payment received, notify customer\n- ready <orderId> <customer_phone>  -> notify customer order is ready'
+    'Admin commands:\n- confirm <orderId>  -> mark payment received\n- ready <orderId> <customer_phone>  -> notify customer order is ready\n- delivered <orderId> <customer_phone>  -> notify customer order is delivered\n- orders  -> show recent orders\n- orders today  -> show today\'s orders'
   );
 }
+
+// ---------- Secured web dashboard to view orders ----------
+app.get('/orders', (req, res) => {
+  const secret = req.query.secret;
+  const adminSecret = process.env.ADMIN_SECRET || 'beeburg_secret_123';
+  if (secret !== adminSecret) {
+    return res.status(403).send('Forbidden: Invalid secret key.');
+  }
+  
+  const allOrders = readOrders();
+  const rows = allOrders.map(o => {
+    const date = new Date(o.timestamp).toLocaleString();
+    return `
+      <tr>
+        <td><strong>${o.orderId}</strong></td>
+        <td>${date}</td>
+        <td>${o.name}<br><small>${o.phone}</small></td>
+        <td>${o.orderText}</td>
+        <td><span class="badge ${o.paymentMethod}">${o.paymentMethod}</span></td>
+        <td><span class="status-${o.status.toLowerCase().replace(/ /g, '-')}">${o.status}</span></td>
+      </tr>
+    `;
+  }).join('');
+
+  const html = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Beeburg Cafe - Order Dashboard</title>
+      <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+      <style>
+        body {
+          font-family: 'Outfit', sans-serif;
+          background: linear-gradient(135deg, #0f172a, #1e293b);
+          color: #f8fafc;
+          margin: 0;
+          padding: 20px;
+          min-height: 100vh;
+        }
+        .container {
+          max-width: 1200px;
+          margin: 0 auto;
+          background: rgba(30, 41, 59, 0.7);
+          backdrop-filter: blur(10px);
+          border-radius: 16px;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          padding: 30px;
+          box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+          padding-bottom: 20px;
+          margin-bottom: 30px;
+        }
+        h1 {
+          margin: 0;
+          font-size: 28px;
+          background: linear-gradient(to right, #f59e0b, #ef4444);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+        }
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          text-align: left;
+        }
+        th {
+          padding: 12px 15px;
+          border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+          color: #94a3b8;
+          font-weight: 600;
+        }
+        td {
+          padding: 15px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+          vertical-align: top;
+        }
+        tr:hover {
+          background: rgba(255,255,255,0.02);
+        }
+        .badge {
+          padding: 4px 8px;
+          border-radius: 6px;
+          font-size: 12px;
+          font-weight: 600;
+        }
+        .badge.UPI {
+          background: #0369a1;
+          color: #e0f2fe;
+        }
+        .badge.COD {
+          background: #b45309;
+          color: #fef3c7;
+        }
+        [class^="status-"] {
+          padding: 4px 10px;
+          border-radius: 20px;
+          font-size: 13px;
+          font-weight: 600;
+          display: inline-block;
+        }
+        .status-pending-payment { background: #334155; color: #cbd5e1; }
+        .status-awaiting-delivery { background: #b45309; color: #fef3c7; }
+        .status-paid { background: #0369a1; color: #e0f2fe; }
+        .status-ready { background: #047857; color: #d1fae5; }
+        .status-delivered { background: #15803d; color: #d1fae5; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <header>
+          <h1>🐝 Beeburg Cafe - Live Orders</h1>
+          <div>Total Orders: ${allOrders.length}</div>
+        </header>
+        <table>
+          <thead>
+            <tr>
+              <th>Order ID</th>
+              <th>Time</th>
+              <th>Customer</th>
+              <th>Order Items</th>
+              <th>Payment Method</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || '<tr><td colspan="6" style="text-align:center;">No orders placed yet.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </body>
+    </html>
+  `;
+  res.send(html);
+});
 
 app.get('/', (req, res) => res.send('Beeburg Cafe WhatsApp Bot is running.'));
 
