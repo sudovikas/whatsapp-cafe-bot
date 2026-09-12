@@ -100,7 +100,7 @@ app.post('/webhook', async (req, res) => {
 
     await handleMessage(phone, name, userInput);
   } catch (err) {
-    console.error('Error handling webhook message:', err.message);
+    console.error('Error handling webhook message:', err.response?.data || err.message || err);
   }
 });
 
