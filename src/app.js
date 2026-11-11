@@ -36,10 +36,14 @@ function createApp() {
   app.locals.idle = async () => { while (queues.size) await Promise.all([...queues.values()]); };
 
   app.post('/webhook', (req, res) => {
+    console.log('[webhook] POST received from Meta');
     if (config.appSecret) {
       const sig = req.get('x-hub-signature-256') || '';
       const want = 'sha256=' + crypto.createHmac('sha256', config.appSecret).update(req.rawBody || '').digest('hex');
-      if (sig.length !== want.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(want))) return res.sendStatus(401);
+      if (sig.length !== want.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(want))) {
+        console.error('[webhook] REJECTED 401: Signature mismatch! Check META_APP_SECRET in Render.');
+        return res.sendStatus(401);
+      }
     }
     res.sendStatus(200); // answer Meta first, work after
 
@@ -117,6 +121,16 @@ function createApp() {
     } else out.groq = { ok: false, error: 'GROQ_API_KEY not set (bot still works, with plain replies)' };
     out.ready = out.config.missing.length === 0 && out.whatsapp.ok;
     res.set('Cache-Control', 'no-store').json(out);
+  });
+
+  app.get('/send-test', admin, async (_req, res) => {
+    try {
+      const resp = await wa.sendText(config.owner, '🧪 Test message from your Beeburg WhatsApp bot server!');
+      res.json({ ok: true, recipient: config.owner, response: resp });
+    } catch (err) {
+      console.error('[send-test] Error:', err.message);
+      res.status(500).json({ ok: false, error: err.message, code: err.code, status: err.status });
+    }
   });
 
   return app;
