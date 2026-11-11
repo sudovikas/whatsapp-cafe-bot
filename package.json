@@ -1,0 +1,17 @@
+{
+  "name": "beeburg-whatsapp-bot",
+  "version": "2.0.0",
+  "description": "WhatsApp ordering bot for Beeburg Cafe: real menu, priced cart, UPI QR with exact amount, owner controls",
+  "main": "server.js",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test test/flow.test.js test/parser.test.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "qrcode": "^1.5.4"
+  }
+}
