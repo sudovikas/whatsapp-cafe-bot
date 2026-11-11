@@ -133,6 +133,26 @@ function createApp() {
     }
   });
 
+  app.get('/subscribe-waba', admin, async (req, res) => {
+    const wabaId = req.query.waba || '1887939352575146';
+    try {
+      const getRes = await fetch(`${config.graphBase}/${config.graphVersion}/${wabaId}/subscribed_apps`, {
+        headers: { Authorization: `Bearer ${config.waToken}` },
+      });
+      const getJson = await getRes.json();
+
+      const postRes = await fetch(`${config.graphBase}/${config.graphVersion}/${wabaId}/subscribed_apps`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${config.waToken}` },
+      });
+      const postJson = await postRes.json();
+
+      res.json({ wabaId, existing: getJson, subscribeResult: postJson });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return app;
 }
 
