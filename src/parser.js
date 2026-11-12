@@ -2,7 +2,14 @@
 // Pure rules + fuzzy matching: no AI involved, so prices and items can never be invented.
 const { ITEMS, SIZES } = require('./menu');
 
-const NUM_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, ek: 1, teen: 3, char: 4, paanch: 5, panch: 5 };
+const NUM_WORDS = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
+  twentyfive: 25, thirty: 30, forty: 40, fifty: 50, hundred: 100, dozen: 12,
+  ek: 1, teen: 3, char: 4, paanch: 5, panch: 5, chhe: 6, saat: 7, aath: 8, nau: 9, das: 10,
+  gyarah: 11, barah: 12, terah: 13, chaudah: 14, pandrah: 15, solah: 16, satrah: 17, atharah: 18, unnees: 19, bees: 20,
+  pachees: 25, pachis: 25, tees: 30, chalees: 40, pachas: 50, sau: 100, darjan: 12,
+};
 const SIZE_WORDS = {
   small: 'small', sm: 'small', s: 'small', chota: 'small', chhota: 'small',
   medium: 'medium', med: 'medium', m: 'medium',
@@ -25,6 +32,8 @@ function stem(t) {
 
 function normalize(text) {
   return String(text || '').toLowerCase()
+    .replace(/\b99\s*combo\b/g, 'combo')
+    .replace(/\bcombo\s*99\b/g, 'combo')
     .replace(/non[\s-]*veg(etarian)?/g, 'nonveg')
     .replace(/veggie\s*4/g, 'veggie')
     .replace(/farm\s+house/g, 'farmhouse')
@@ -97,9 +106,9 @@ function splitSegments(text) {
     const toks = p.split(/\s+/);
     let cur = [];
     toks.forEach((t, i) => {
-      const isQty = /^\d+$/.test(t) && Number(t) <= 20;
+      const isQty = (/^\d+$/.test(t) && Number(t) >= 1 && Number(t) <= 500) || Boolean(NUM_WORDS[t]);
       // "2 cheese burger 1 cold coffee" -> split before a quantity that sits between words
-      if (isQty && cur.some(c => !/^\d+$/.test(c)) && i < toks.length - 1) { out.push(cur.join(' ')); cur = []; }
+      if (isQty && cur.some(c => !/^\d+$/.test(c) && !NUM_WORDS[c]) && i < toks.length - 1) { out.push(cur.join(' ')); cur = []; }
       cur.push(t);
     });
     if (cur.length) out.push(cur.join(' '));
@@ -115,7 +124,7 @@ function parseSegment(seg) {
     const raw = raws[i];
     // Hindi "do" = 2, but not the English "do you have..."
     if (raw === 'do') { if (qty === null && raws[i + 1] && !['you', 'u', 'i', 'we', 'they', 'not'].includes(raws[i + 1])) qty = 2; continue; }
-    if (/^\d+$/.test(raw)) { if (qty === null && Number(raw) >= 1 && Number(raw) <= 20) qty = Number(raw); continue; }
+    if (/^\d+$/.test(raw)) { if (qty === null && Number(raw) >= 1 && Number(raw) <= 500) qty = Number(raw); continue; }
     if (NUM_WORDS[raw] && qty === null) { qty = NUM_WORDS[raw]; continue; }
     if (SIZE_WORDS[raw] && !size) { size = SIZE_WORDS[raw]; continue; }
     const t = stem(raw);

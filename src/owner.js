@@ -33,20 +33,69 @@ const notifyPaymentClaim = (o, viaImage) => tell(
   [{ id: `o:paid:${o.id}`, title: 'Payment received' }, cancelBtn(o)]);
 const notifyCustomerCancel = o => tell(`❌ ${head(o)} cancelled their order before paying.`);
 
-const HELP = `Owner commands (or just tap the buttons on each order):
-*paid BB1432* - payment received, start preparing
-*ready BB1432* - ready / out for delivery
-*done BB1432* - handed over
-*cancel BB1432* - cancel and tell the customer
-*orders* - today's orders
-*pending* - orders still open
-Start a message with # to test as a customer, e.g. *#hi*`;
+function formatOrderCard(o) {
+  const time = store.istTime(o.createdAt);
+  const items = o.lines.map(l => `   • ${l.qty} × ${l.name} (₹${l.amount})`).join('\n');
+  const how = o.fulfilment === 'delivery' ? `🛵 *Delivery:* ${o.address || 'Address provided'}` : '🍽️ *Pickup at cafe*';
+  const pay = `${o.payment.toUpperCase()}${o.paid ? ' (Paid ✅)' : ' (Unpaid ⏳)'}`;
+  const note = o.note ? `\n   📝 *Note:* ${o.note}` : '';
+  const statusEmoji = {
+    [STATUS.AWAITING_PAYMENT]: '⏳',
+    [STATUS.PAYMENT_CLAIMED]: '💰',
+    [STATUS.PREPARING]: '🍳',
+    [STATUS.READY]: '🟢',
+    [STATUS.COMPLETED]: '✅',
+    [STATUS.CANCELLED]: '❌',
+  }[o.status] || '📦';
+
+  return `━━━━━━━━━━━━━━━━━━━━━
+${statusEmoji} *Order ${o.id}* [${time}] · *${o.status}*
+👤 *${o.name || 'Customer'}* (+${o.phone})
+${items}${note}
+💵 *Total: ${rs(o.total)}* via ${pay}
+${how}`;
+}
+
+const HELP = `👑 *Beeburg Cafe — Owner Desk* 🐝
+
+Owner commands (or just tap the buttons on each order):
+• *pending* — see orders needing action
+• *orders* — see full list of today's orders
+• *paid BB1432* — payment received, start preparing
+• *ready BB1432* — ready / out for delivery
+• *done BB1432* — handed over
+• *cancel BB1432* — cancel and tell the customer
+
+💡 *Customer test mode:* Start a message with # to test as a customer, e.g. *#hi*`;
 
 function list(orders, title) {
   if (!orders.length) return `${title}: none.`;
-  const rows = orders.slice(-15).map(o => `*${o.id}* ${store.istTime(o.createdAt)} · ${o.name || ''} · ${rs(o.total)} · ${o.payment.toUpperCase()} · ${o.status}`);
   const paid = orders.filter(o => o.status !== STATUS.CANCELLED && o.status !== STATUS.AWAITING_PAYMENT);
-  return `${title} (${orders.length}):\n${rows.join('\n')}\n\nSales (excluding unpaid/cancelled): ${rs(paid.reduce((t, o) => t + o.total, 0))}`;
+  const sales = paid.reduce((t, o) => t + o.total, 0);
+  const upiSales = paid.filter(o => o.payment === 'upi').reduce((t, o) => t + o.total, 0);
+  const cashSales = paid.filter(o => o.payment === 'cash').reduce((t, o) => t + o.total, 0);
+  const completed = orders.filter(o => o.status === STATUS.COMPLETED).length;
+  const open = orders.filter(o => !store.FINAL.includes(o.status)).length;
+  const cancelled = orders.filter(o => o.status === STATUS.CANCELLED).length;
+
+  const isPendingView = title.toLowerCase().includes('open');
+  const cards = (isPendingView ? orders : orders.slice(-10)).map(formatOrderCard).join('\n');
+
+  if (isPendingView) {
+    return `📋 *Open / Pending Orders (${orders.length}):*
+${cards}
+━━━━━━━━━━━━━━━━━━━━━
+
+👉 *Action:* Type *paid <id>*, *ready <id>*, or *done <id>*`;
+  }
+
+  return `📊 *${title} (${orders.length}):*
+
+💰 *Sales (excluding unpaid/cancelled): ${rs(sales)}*
+   (UPI: ${rs(upiSales)} | Cash: ${rs(cashSales)})
+📈 *Stats:* ✅ ${completed} Done | 🕒 ${open} Open | ❌ ${cancelled} Cancelled
+${cards}
+━━━━━━━━━━━━━━━━━━━━━`;
 }
 
 async function handle(msg) {
@@ -59,8 +108,18 @@ async function handle(msg) {
     if (m) { action = m[1].toLowerCase(); id = m[2]; }
   }
   if (!action) {
-    if (/^orders?(\s+today)?$/i.test(text)) return tell(list(store.todaysOrders(), "Today's orders"));
-    if (/^pending$/i.test(text)) return tell(list(store.allOrders().filter(o => !store.FINAL.includes(o.status)), 'Open orders'));
+    if (msg.buttonId === 'o:cmd:pending' || /^pending$/i.test(text)) {
+      return tell(list(store.allOrders().filter(o => !store.FINAL.includes(o.status)), 'Open orders'));
+    }
+    if (msg.buttonId === 'o:cmd:today' || /^orders?(\s+today)?$/i.test(text)) {
+      return tell(list(store.todaysOrders(), "Today's orders"));
+    }
+    if (/^(hi+|hello+|hey+|namaste|help)$/i.test(text)) {
+      return tell(HELP, [
+        { id: 'o:cmd:pending', title: '📋 Pending Orders' },
+        { id: 'o:cmd:today', title: "📊 Today's Orders" },
+      ]);
+    }
     return tell(HELP);
   }
   action = { confirm: 'paid', delivered: 'done', completed: 'done', reject: 'cancel' }[action] || action;

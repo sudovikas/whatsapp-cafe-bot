@@ -73,17 +73,27 @@ async function sendMenu(from, s) {
   return say(from, `To order, just send the items with quantity, like:\n${EXAMPLE}\n\n🛵 Free home delivery · Open ${config.cafe.hours}`);
 }
 
-// ---------- cart ----------
 function addLine(s, item, qty, size) {
   const same = s.cart.find(l => l.itemId === item.id && l.size === (size || null));
-  if (same) same.qty = Math.min(same.qty + qty, 50);
-  else s.cart.push({ itemId: item.id, size: size || null, qty });
+  if (same) same.qty = Math.min(same.qty + qty, 500);
+  else s.cart.push({ itemId: item.id, size: size || null, qty: Math.min(qty, 500) });
   s.step = 'CART';
 }
-function showCart(from, s) {
+async function showCart(from, s) {
   const rows = cartRows(s.cart);
   s.step = 'CART';
-  return wa.sendButtons(from, `🧾 *Your order*\n${rowsText(rows)}${s.note ? `\n📝 Note: ${s.note}` : ''}\n\n*Total: ${rs(sum(rows))}*\n\nSend more items to add them, or confirm.`,
+  const total = sum(rows);
+  const itemsText = rowsText(rows);
+  const noteText = s.note ? `\n📝 Note: ${s.note}` : '';
+  const body = `🧾 *Your order*\n${itemsText}${noteText}\n\n*Total: ${rs(total)}*\n\nSend more items to add them, or confirm.`;
+
+  if (body.length > 950) {
+    await say(from, `🧾 *Your Order Items (${rows.length}):*\n\n${itemsText}${noteText}`);
+    return wa.sendButtons(from, `*Total: ${rs(total)}*\n\nReady to proceed with this order?`,
+      [{ id: 'cart:confirm', title: 'Confirm order ✅' }, { id: 'cart:add', title: 'Add more' }, { id: 'cart:clear', title: 'Clear cart' }]);
+  }
+
+  return wa.sendButtons(from, body,
     [{ id: 'cart:confirm', title: 'Confirm order ✅' }, { id: 'cart:add', title: 'Add more' }, { id: 'cart:clear', title: 'Clear cart' }]);
 }
 const next = (from, s) => (s.pending.length ? askPending(from, s) : s.cart.length ? showCart(from, s) : null);
@@ -115,7 +125,7 @@ async function addFromText(from, s, text) {
   const notes = [];
   // Hindi (or other non-Latin) script: the rule parser cannot read it, so let the AI try the whole message.
   if (!res.lines.length && !res.questions.length && !res.vague.length && !res.unknown.length && /\p{L}/u.test(text.replace(/[\x00-\x7F]/g, ''))) {
-    res.unknown.push({ text, qty: Math.min(Number((/\d+/.exec(text) || [1])[0]) || 1, 20), size: null });
+    res.unknown.push({ text, qty: Math.min(Number((/\d+/.exec(text) || [1])[0]) || 1, 500), size: null });
   }
   const looksLikeOrder = res.lines.length || res.questions.length || res.vague.length || ORDER_INTENT.test(text.toLowerCase());
   for (const u of res.unknown.slice(0, 3)) {
@@ -143,10 +153,28 @@ async function addFromText(from, s, text) {
 
 async function removeItems(from, s, what) {
   const res = parseOrder(what);
-  const ids = new Set([...res.lines.map(l => l.item.id), ...res.questions.flatMap(q => (q.item ? [q.item.id] : q.options.map(o => o.id)))]);
   const before = s.cart.length;
-  s.cart = s.cart.filter(l => !ids.has(l.itemId));
-  if (s.cart.length === before) await say(from, `I couldn't find that in your cart.`);
+  let changed = false;
+
+  for (const l of res.lines) {
+    const idx = s.cart.findIndex(c => c.itemId === l.item.id && (!l.size || c.size === l.size));
+    if (idx !== -1) {
+      changed = true;
+      if (l.qty && s.cart[idx].qty > l.qty) {
+        s.cart[idx].qty -= l.qty;
+      } else {
+        s.cart.splice(idx, 1);
+      }
+    }
+  }
+
+  if (!changed) {
+    const ids = new Set([...res.lines.map(l => l.item.id), ...res.questions.flatMap(q => (q.item ? [q.item.id] : q.options.map(o => o.id)))]);
+    s.cart = s.cart.filter(l => !ids.has(l.itemId));
+    if (s.cart.length !== before) changed = true;
+  }
+
+  if (!changed) await say(from, `I couldn't find that in your cart.`);
   if (!s.cart.length) { store.resetCart(s); return say(from, `Your cart is empty now. Send your order like ${EXAMPLE}.`); }
   return showCart(from, s);
 }
