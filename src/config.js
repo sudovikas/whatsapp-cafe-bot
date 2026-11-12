@@ -12,7 +12,7 @@ const config = {
   get upiVpa() { return env('UPI_VPA'); },
   get upiName() { return env('UPI_NAME', 'Beeburg Cafe'); },
   get groqKey() { return env('GROQ_API_KEY'); },
-  get groqModel() { return env('GROQ_MODEL', 'llama-3.1-8b-instant'); },
+  get groqModel() { return env('GROQ_MODEL', 'llama-3.3-70b-versatile'); },
   get adminSecret() { return env('ADMIN_SECRET'); },
   get dataDir() { return env('DATA_DIR', './data'); },
   get graphBase() { return env('GRAPH_BASE_URL', 'https://graph.facebook.com').replace(/\/+$/, ''); },

@@ -4,19 +4,40 @@
 const config = require('./config');
 const { menuText, ITEMS, BY_ID } = require('./menu');
 
+let activeModel = config.groqModel;
+
 async function groq(body) {
   if (!config.groqKey) return null;
-  try {
-    const res = await fetch(`${config.groqBase}/chat/completions`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${config.groqKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: config.groqModel, ...body }),
-      signal: AbortSignal.timeout(8000),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) { console.error('Groq error', res.status, data.error?.message || ''); return null; }
-    return (data.choices?.[0]?.message?.content || '').trim() || null;
-  } catch (err) { console.error('Groq unavailable:', err.message); return null; }
+  const modelsToTry = [
+    activeModel,
+    'llama-3.3-70b-versatile',
+    'llama3-8b-8192',
+    'llama-3.1-70b-versatile',
+    'llama3-70b-8192',
+    'gemma2-9b-it',
+  ].filter(Boolean);
+
+  for (const model of [...new Set(modelsToTry)]) {
+    try {
+      const res = await fetch(`${config.groqBase}/chat/completions`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${config.groqKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, ...body }),
+        signal: AbortSignal.timeout(8000),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        activeModel = model;
+        return (data.choices?.[0]?.message?.content || '').trim() || null;
+      }
+      console.warn(`Groq model ${model} error:`, res.status, data.error?.message || '');
+      if (res.status !== 404) return null;
+    } catch (err) {
+      console.error('Groq unavailable:', err.message);
+      return null;
+    }
+  }
+  return null;
 }
 
 function systemPrompt() {
