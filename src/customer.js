@@ -13,7 +13,7 @@ const { STATUS } = store;
 const EXAMPLE = '*2 cheese burger, 1 margherita medium*';
 const GREET = /^(hi+|hello+|hey+|hlo|helo|hola|namaste|namaskar|start|good (morning|afternoon|evening))( bee| there| ji)?$/;
 const PAID = /\b(paid|payment done|pay kar diya|kar diya|ho gaya|bhej diya|transferred|payment sent)\b/;
-const QUESTION = /\?|^(what|when|where|why|how|which|who|is|are|do you|does|can you|could you|kya|kab|kahan|kaha|kitna|kitne|kaise|kaun)\b|\b(price|rate|timing|timings|open|close|closed|address|location|available|charge|charges|minimum|offer|discount)\b/;
+const QUESTION = /\?|^(what|when|where|why|how|which|who|is|are|do you|does|can you|could you|kya|kab|kahan|kaha|kitna|kitne|kaise|kaun|batao|suggest)\b|\b(price|rate|timing|timings|open|close|closed|address|location|available|charge|charges|minimum|offer|discount|best|special|recommend|suggest|suggestion|favorite|favourite|accha|achha|badhiya|famous|parking|taste|review|swad|kaisa|kya chal|kya haal|kya be|kya khaye|sarcasm|joke|kuch)\b/i;
 const ORDER_INTENT = /^\d|\b(i want|i need|i would like|i'd like|can i (get|have|order)|give me|send me|get me|chahiye|mujhe|order karna)\b/;
 
 const say = (to, text) => wa.sendText(to, text);
@@ -60,17 +60,17 @@ async function handle(msg) {
 
 // ---------- greeting & menu ----------
 async function greet(from, s) {
-  if (s.cart.length) { await say(from, `Welcome back${firstName(s.name)}! Your cart is still here 👇`); return showCart(from, s); }
-  await say(from, `Hey${firstName(s.name)}! 🐝 Welcome to ${config.cafe.name}. Here's our menu 👇`);
+  if (s.cart.length) { await say(from, `Welcome back${firstName(s.name)}! 🐝 Your cart is still saved below 👇`); return showCart(from, s); }
+  await say(from, `Hey${firstName(s.name)}! 🐝 Welcome to *${config.cafe.name}* in Shivpur, Varanasi! Here's our menu 👇`);
   return sendMenu(from, s);
 }
 async function sendMenu(from, s) {
-  for (const [file, caption] of [['menu-burgers.jpg', 'Burgers, sandwiches, wraps, pasta, fries (1/2)'], ['menu-pizzas.jpg', 'Pizzas (2/2)']]) {
+  for (const [file, caption] of [['menu-burgers.jpg', '🍔 Burgers, Sandwiches, Wraps, Pasta & Fries (1/2)'], ['menu-pizzas.jpg', '🍕 Pizzas & Combos (2/2)']]) {
     try { await wa.sendImage(from, `${config.baseUrl}/public/${file}`, caption); }
     catch (err) { console.error('Menu image failed (check BASE_URL):', err.message); }
   }
   s.menuSent = true;
-  return say(from, `To order, just send the items with quantity, like:\n${EXAMPLE}\n\n🛵 Free home delivery · Open ${config.cafe.hours}`);
+  return say(from, `Order lagana bilkul aasan hai! 😋\nBas items aur quantity likh kar bhej dijiye, jaise:\n👉 *${EXAMPLE}*\n\n🛵 *Free Home Delivery* · ⏰ *Open 11 AM to 2 AM!*`);
 }
 
 function addLine(s, item, qty, size) {

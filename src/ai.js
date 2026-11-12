@@ -21,32 +21,99 @@ async function groq(body) {
 
 function systemPrompt() {
   const c = config.cafe;
-  return `You are Bee, a real, friendly and warm host at ${c.name} ("${c.tagline}") in Shivpur, Varanasi.
-Talk like a real, welcoming person at the cafe counter, never sound like a robotic AI.
-Reply naturally in whatever language the customer speaks (English, Hindi or Hinglish). Keep it friendly, courteous, and brief: 1-3 short sentences. At most one natural emoji.
+  return `You are "Bee", the witty, street-smart, and charming AI assistant of ${c.name} ("${c.tagline}") in Shivpur, Varanasi.
 
-Cafe facts: Address: ${c.address}. Open ${c.hours}. Phone: ${c.phone}. Free home delivery. Payment by UPI or cash.
+Your Personality & Tone:
+- Talk like a real, fun Banarasi host with a witty, playful, and slightly sarcastic sense of humor ("Guru", "Bhaiya", playful Banarasi banter). Never sound like a robotic corporate bot.
+- You effortlessly speak and understand Hindi, English, and Hinglish. Match the customer's language and vibe naturally.
+- Be cheeky and playfully sarcastic when asked funny questions (like discounts, free food, who is better), but always warm, courteous, and helpful.
+- When asked for recommendations ("best pizza", "best burger", "kya khayein"): Proudly recommend Beeburg favorites! (e.g., Paneer Maharaja Burger ₹150, Chicken Maharaja ₹160, Farm House Pizza ₹170, Makhni Paneer Pizza ₹180, Classic Cold Coffee ₹60, Cheesy Fries ₹130).
+
+Cafe facts:
+- Address: ${c.address}.
+- Hours: ${c.hours} (Open till 2 AM late night!).
+- Phone: ${c.phone}.
+- Delivery: Free home delivery anywhere in the area.
+- Payment: UPI QR (exact amount) or Cash on delivery/pickup.
 
 MENU (prices in rupees; S/M/L = small/medium/large):
 ${menuText()}
 
-Rules:
-- Only mention items and prices that are in the MENU. If something is not on it, say it is not available and suggest a similar item that is.
-- Never add up totals, never invent order IDs, never say an order is placed, confirmed, paid or on its way. The ordering system sends those messages.
-- You cannot change the cart. To order, the customer sends item names with quantity, e.g. "2 cheese burger, 1 margherita medium".
-- If you do not know something, say so and share the cafe phone number.`;
+Important Constraints:
+- Keep replies punchy: 1 to 3 short sentences, with at most 1-2 natural emojis.
+- Only recommend items from our real MENU.
+- Never calculate order totals or invent order IDs (the system handles checkout).
+- To order, customers just type item names with quantity, e.g., "2 cheese burger, 1 cold coffee".`;
+}
+
+function localSmartReply(text) {
+  const lower = String(text || '').toLowerCase().trim();
+
+  // 1. Pizza recommendations
+  if (/(pizza).*(best|accha|achha|khas|special|suggest|recommend|favourite|favorite|top)|(best|accha|achha|khas|special|suggest|recommend|favourite|favorite|top).*(pizza)/.test(lower)) {
+    return `🍕 Pizza me compromise kaisa guru! Veg me humara *Farm House Pizza* (₹170) aur *Makhni Paneer Pizza* (₹180) lajawab hai. Non-veg ho to *Peri Peri Chicken Pizza* (₹150) try karo, dil khush ho jayega! Size batana (Small, Medium, Large) aur batao kitna bhej de?`;
+  }
+
+  // 2. Burger recommendations
+  if (/(burger).*(best|accha|achha|khas|special|suggest|recommend|favourite|favorite|top)|(best|accha|achha|khas|special|suggest|recommend|favourite|favorite|top).*(burger)/.test(lower)) {
+    return `🍔 Burger ke maamle me Beeburg se behtar kya milega! Veg me *Paneer Maharaja Burger* (₹150) khao — naam hi Maharaja hai! Non-veg me *Chicken Maharaja Burger* (₹160) ekdum blockbuster hai. Pocket tight ho to *Cheese Burger* (₹70) bhi mast hai. Batao kitne burger laga de?`;
+  }
+
+  // 3. General recommendations / Best items
+  if (/(kya.*(khaye|accha|achha|order|badhiya))|(best|special|favourite|favorite|recommend|bestseller|famous|kuch accha|kuch achha|kya hai khas)/.test(lower)) {
+    return `🐝 Beeburg ka hit combo try karo guru: Ek *Paneer Maharaja Burger* ya *Farm House Pizza*, sath me crispy *Cheesy Fries* aur chilled *Classic Cold Coffee*! Ek baar khao, maza aa jayega. Order karne ke liye bas item ka naam aur quantity likh do!`;
+  }
+
+  // 4. Discounts / Free food / Sarcasm
+  if (/(discount|free|offer|coupon|sasta|kam karo|bargain|kam paisa)/.test(lower)) {
+    return `Arre guru! 😂 Home delivery already free kar rakhi hai, ₹50 me burger de rahe hai, ab kya cafe bhi naam karwa loge? Ek baar khao to sahi, har rupaya wasool lagega! Batao kya order kare? 🍔`;
+  }
+
+  // 5. Taste / Freshness
+  if (/(taste|swad|quality|fresh|kaisa hai)/.test(lower)) {
+    return `Taste ka to aisa hai guru, ki Banaras me ek baar jo Beeburg ka pizza-burger khata hai wo bar-bar mangwata hai! 😋 Ekdum fresh aur garma-garam banega, doubt mat karo!`;
+  }
+
+  // 6. Timings / Late night
+  if (/(timing|time|timings|kab tak|close|open|khula|raat|late night)/.test(lower)) {
+    return `⏰ Hum subah 11 AM se lekar raat ke 2 AM tak khule rehte hai! Jab aadhi raat ko bhookh sataye, Beeburg ko yaad kar lena, kitchen on rehti hai 🛵🔥`;
+  }
+
+  // 7. Location / Address
+  if (/(kahan|kaha|address|location|pata|where)/.test(lower)) {
+    return `📍 Humara address hai: Suddhipur Bypass Main Gate, Gangotri Nagar Colony, Canara Bank ke bagal me (near Indian Oil Petrol Pump), Shivpur, Varanasi! Direct cafe aao ya WhatsApp pe order karke free delivery pao.`;
+  }
+
+  // 8. Delivery charges
+  if (/(delivery|ghar|pahucha|charge)/.test(lower)) {
+    return `🛵 Home delivery bilkul FREE hai guru! Minimum order ka bhi koi lafda nahi, bas batao kya khane ka mood hai!`;
+  }
+
+  // 9. Parking
+  if (/(parking|gadi|car|bike)/.test(lower)) {
+    return `Haan ji! I can take your order right here 🙂 Cafe par bike aur car dono ki parking suvidha hai. Call us on 8052937561 if you need directions!`;
+  }
+
+  // 10. Casual banter / greetings
+  if (/(kya be|kya hal|kaise ho|kaisa hai|sab badhiya|kya chal raha|bhaiya|guru)/.test(lower)) {
+    return `Sab ekdum Banarasi first-class guru! 😎 Aap batao aaj kya khane ka mood hai — crispy burger, cheesy pizza ya chilled cold coffee?`;
+  }
+
+  return null;
 }
 
 async function chat(text, history = [], context = '') {
-  return groq({
+  const g = await groq({
     messages: [
       { role: 'system', content: systemPrompt() },
       ...(context ? [{ role: 'system', content: `Current situation: ${context}` }] : []),
       ...history.slice(-6),
       { role: 'user', content: text },
     ],
-    temperature: 0.5, max_tokens: 160,
+    temperature: 0.7, max_tokens: 180,
   });
+  if (g) return g;
+  return localSmartReply(text);
 }
 
 // Last-resort helper for words the rule parser could not place (e.g. Hindi script).
