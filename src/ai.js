@@ -4,40 +4,67 @@
 const config = require('./config');
 const { menuText, ITEMS, BY_ID } = require('./menu');
 
-let activeModel = config.groqModel;
+let cachedModel = null;
+let lastModelFetch = 0;
+
+async function getLiveGroqModel() {
+  if (cachedModel && Date.now() - lastModelFetch < 3600000) return cachedModel;
+  try {
+    const res = await fetch(`${config.groqBase}/models`, {
+      headers: { Authorization: `Bearer ${config.groqKey}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && Array.isArray(data.data)) {
+      const active = data.data
+        .filter(m => m.active !== false)
+        .map(m => m.id)
+        .filter(id => !/whisper|tts|embed|vision|guard/i.test(id));
+
+      console.log('[Groq] Live available models on account:', active);
+
+      // Prioritize modern chat models
+      const chosen = active.find(m => m === config.groqModel)
+        || active.find(m => m.includes('70b') && !m.includes('specdec'))
+        || active.find(m => m.includes('llama') && !m.includes('guard'))
+        || active.find(m => m.includes('mixtral'))
+        || active.find(m => m.includes('gemma'))
+        || active[0];
+
+      if (chosen) {
+        cachedModel = chosen;
+        lastModelFetch = Date.now();
+        console.log('[Groq] Automatically selected model:', cachedModel);
+        return cachedModel;
+      }
+    }
+  } catch (err) {
+    console.warn('[Groq] Model discovery error:', err.message);
+  }
+  return config.groqModel || 'llama-3.3-70b-versatile';
+}
 
 async function groq(body) {
   if (!config.groqKey) return null;
-  const modelsToTry = [
-    activeModel,
-    'llama-3.3-70b-versatile',
-    'llama3-8b-8192',
-    'llama-3.1-70b-versatile',
-    'llama3-70b-8192',
-    'gemma2-9b-it',
-  ].filter(Boolean);
-
-  for (const model of [...new Set(modelsToTry)]) {
-    try {
-      const res = await fetch(`${config.groqBase}/chat/completions`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${config.groqKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, ...body }),
-        signal: AbortSignal.timeout(8000),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        activeModel = model;
-        return (data.choices?.[0]?.message?.content || '').trim() || null;
-      }
-      console.warn(`Groq model ${model} error:`, res.status, data.error?.message || '');
-      if (res.status !== 404) return null;
-    } catch (err) {
-      console.error('Groq unavailable:', err.message);
-      return null;
+  const model = await getLiveGroqModel();
+  try {
+    const res = await fetch(`${config.groqBase}/chat/completions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${config.groqKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, ...body }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      return (data.choices?.[0]?.message?.content || '').trim() || null;
     }
+    console.warn(`Groq error with model ${model}:`, res.status, data.error?.message || '');
+    cachedModel = null; // Invalidate cached model so next call re-discovers
+    return null;
+  } catch (err) {
+    console.error('Groq unavailable:', err.message);
+    return null;
   }
-  return null;
 }
 
 function systemPrompt() {

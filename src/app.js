@@ -153,6 +153,18 @@ function createApp() {
     }
   });
 
+  app.get('/groq-models', admin, async (_req, res) => {
+    try {
+      const r = await fetch(`${config.groqBase}/models`, {
+        headers: { Authorization: `Bearer ${config.groqKey}` },
+      });
+      const data = await r.json();
+      res.json(data);
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   return app;
 }
 
