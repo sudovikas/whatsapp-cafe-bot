@@ -101,7 +101,31 @@ function createApp() {
     if (!crypto.timingSafeEqual(a, b)) return res.status(403).send('Forbidden');
     next();
   };
-  app.get(['/admin', '/orders'], admin, (_req, res) => res.set('Cache-Control', 'no-store').send(dashboard.page()));
+  app.get(['/admin', '/orders'], admin, (req, res) => {
+    const key = String(req.query.key || req.query.secret || '');
+    res.set('Cache-Control', 'no-store').send(dashboard.page(key));
+  });
+
+  app.get('/admin/export-customers', admin, (_req, res) => {
+    const orders = store.allOrders();
+    const map = new Map();
+    for (const o of orders) {
+      if (!map.has(o.phone)) {
+        map.set(o.phone, { phone: o.phone, name: o.name || 'Customer', orders: 0, total: 0, lastOrder: o.createdAt });
+      }
+      const c = map.get(o.phone);
+      c.orders++;
+      c.total += (o.total || 0);
+      if (new Date(o.createdAt) > new Date(c.lastOrder)) c.lastOrder = o.createdAt;
+    }
+    const csvRows = ['Phone,Name,TotalOrders,TotalSpend,LastOrderDate'];
+    for (const c of map.values()) {
+      csvRows.push(`"${c.phone}","${c.name.replace(/"/g, '""')}",${c.orders},${c.total},"${store.istTime(c.lastOrder)} ${store.ist(new Date(c.lastOrder)).day}"`);
+    }
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="customers.csv"');
+    res.send(csvRows.join('\n'));
+  });
 
   // One URL that tells you exactly what is and isn't working.
   app.get('/health', admin, async (_req, res) => {

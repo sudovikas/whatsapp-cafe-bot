@@ -5,6 +5,7 @@ const ai = require('./ai');
 const config = require('./config');
 const store = require('./store');
 const owner = require('./owner');
+const viral = require('./viral');
 const { BY_ID, SIZES, priceOf, lineName, cap } = require('./menu');
 const { parseOrder, parseSize, resolved, pickFrom } = require('./parser');
 const { rs, cartRows, sum, rowsText, orderText } = require('./format');
@@ -41,12 +42,16 @@ async function handle(msg) {
     return say(from, `I can only read text messages right now 🙂 To order, send something like ${EXAMPLE}, or type *menu*.`);
   }
 
+  if (btn === 'act:roll') return sendSurprise(from, s);
+
   if (!btn) {
     if (GREET.test(lower)) return greet(from, s);
     if (/^(menu|menu please|show menu|send menu|menu bhejo|menu card)$/.test(lower)) return sendMenu(from, s);
     if (/^(cancel|clear|reset|cancel order|clear cart|cancel my order)$/.test(lower)) return cancel(from, s);
     if (/^(status|order status|my order|my cart|cart|track|track order|where is my order|what is my order|what did i order)$/.test(lower)) return status(from, s);
-    if (lower === 'help') return say(from, `Here's how it works:\n• Send your order, e.g. ${EXAMPLE}\n• *menu* - see the menu\n• *status* - see your cart or order\n• *cancel* - start over\nOr call us on ${config.cafe.phone}.`);
+    if (/^(fortune|vibe|joke|meme|shayari|quote)$/.test(lower)) return say(from, viral.getRandomFortune());
+    if (/^(surprise|surprise me|craving|bhookh|kuch bhi)$/.test(lower)) return sendSurprise(from, s);
+    if (lower === 'help') return say(from, `Here's how it works:\n• Send your order, e.g. ${EXAMPLE}\n• *menu* - see the menu\n• *surprise* - 🎲 Craving Buster combo\n• *fortune* - ⭐ Daily food meme & vibe\n• *status* - see your cart or order\n• *cancel* - start over\nOr call us on ${config.cafe.phone}.`);
   }
 
   if (s.pending.length) return answerPending(from, s, text, lower, btn);
@@ -71,6 +76,14 @@ async function sendMenu(from, s) {
   }
   s.menuSent = true;
   return say(from, `Order lagana bilkul aasan hai! 😋\nBas items aur quantity likh kar bhej dijiye, jaise:\n👉 *${EXAMPLE}*\n\n🛵 *Free Home Delivery* · ⏰ *Open 11 AM to 2 AM!*`);
+}
+
+async function sendSurprise(from, s) {
+  const pick = viral.getSurpriseCombo();
+  return wa.sendButtons(from, pick.text, [
+    { id: 'act:roll', title: '🎲 Roll Again' },
+    { id: 'menu', title: '📋 Full Menu' },
+  ]);
 }
 
 function addLine(s, item, qty, size) {

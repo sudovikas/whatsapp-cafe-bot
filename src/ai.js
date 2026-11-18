@@ -147,6 +147,21 @@ function localSmartReply(text) {
     return `Sab ekdum Banarasi first-class guru! 😎 Aap batao aaj kya khane ka mood hai — crispy burger, cheesy pizza ya chilled cold coffee?`;
   }
 
+  // 11. Mood off / Breakup / Sad
+  if (/(mood|sad|breakup|ro|dukhi|tension|stress)/.test(lower)) {
+    return `Mood off ho ya life me tension, Beeburg ka cheesy pizza aur cold coffee sab theek kar deta hai guru! ❤️ Ek *Cheese Burger* aur *French Fry* mangwao, scene sort ho jayega!`;
+  }
+
+  // 12. Party / Treat / Squad
+  if (/(party|treat|dost|bhai log|squad)/.test(lower)) {
+    return `Party ka scene hai to tension mat lo guru! 🥳 *Combo 99* ya *Farm House Pizza* mangwao, sab impress ho jayenge. Batao kitne logo ka order banana hai?`;
+  }
+
+  // 13. Gen-Z Slang (Rizz, No Cap, Lit, Mid)
+  if (/(rizz|no cap|cap|lit|mid|bussin|scene)/.test(lower)) {
+    return `No cap guru, Beeburg ka taste 100% lit hai, zero mid vibes! 🧢🔥 Fast delivery aur supreme cheese pull. Aaj kya order lagaya jaye?`;
+  }
+
   return null;
 }
 
