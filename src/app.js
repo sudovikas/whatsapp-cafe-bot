@@ -108,11 +108,21 @@ function createApp() {
           else if (m.type === 'location') { msg.type = 'location'; msg.location = m.location || {}; }
 
           console.log(`[in] ${m.from} ${msg.type}: ${msg.buttonId || msg.text.slice(0, 80)}`);
+          const isOwner = phone => {
+            if (!config.owner) return false;
+            const o = config.owner.replace(/\D/g, '');
+            const p = String(phone || '').replace(/\D/g, '');
+            if (o === p) return true;
+            if (o.length === 10 && p === '91' + o) return true;
+            if (p.length === 10 && o === '91' + p) return true;
+            return false;
+          };
+
           enqueue(m.from, async () => {
             wa.markRead(m.id);
             // Owner messages are commands, unless they start with "#" (test as a customer)
             // or they tap a customer button while testing.
-            if (config.owner && m.from === config.owner) {
+            if (isOwner(m.from)) {
               const asCustomer = msg.text.startsWith('#') || (msg.type === 'button' && !msg.buttonId.startsWith('o:')) || ['image', 'location'].includes(msg.type);
               if (!asCustomer) return owner.handle(msg);
               msg.text = msg.text.replace(/^#\s*/, '');

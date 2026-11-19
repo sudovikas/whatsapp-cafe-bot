@@ -35,9 +35,9 @@ const notifyCustomerCancel = o => tell(`❌ ${head(o)} cancelled their order bef
 
 function formatOrderCard(o) {
   const time = store.istTime(o.createdAt);
-  const items = o.lines.map(l => `   • ${l.qty} × ${l.name} (₹${l.amount})`).join('\n');
+  const items = (o.lines || []).map(l => `   • ${l.qty} × ${l.name} (₹${l.amount})`).join('\n') || '   • (No items)';
   const how = o.fulfilment === 'delivery' ? `🛵 *Delivery:* ${o.address || 'Address provided'}` : '🍽️ *Pickup at cafe*';
-  const pay = `${o.payment.toUpperCase()}${o.paid ? ' (Paid ✅)' : ' (Unpaid ⏳)'}`;
+  const pay = `${(o.payment || 'cash').toUpperCase()}${o.paid ? ' (Paid ✅)' : ' (Unpaid ⏳)'}`;
   const note = o.note ? `\n   📝 *Note:* ${o.note}` : '';
   const statusEmoji = {
     [STATUS.AWAITING_PAYMENT]: '⏳',
@@ -52,15 +52,16 @@ function formatOrderCard(o) {
 ${statusEmoji} *Order ${o.id}* [${time}] · *${o.status}*
 👤 *${o.name || 'Customer'}* (+${o.phone})
 ${items}${note}
-💵 *Total: ${rs(o.total)}* via ${pay}
+💵 *Total: ${rs(o.total || 0)}* via ${pay}
 ${how}`;
 }
 
 const HELP = `👑 *Beeburg Cafe — Owner Desk* 🐝
 
 Owner commands (or just tap the buttons on each order):
-• *pending* — see orders needing action
-• *orders* — see full list of today's orders
+• *pending* or *pending orders* — see orders needing kitchen action
+• *orders* or *today orders* — see full list of today's orders
+• *<order id>* (e.g. *BB1432*) — check a single order's details
 • *paid BB1432* — payment received, start preparing
 • *ready BB1432* — ready / out for delivery
 • *done BB1432* — handed over
@@ -69,7 +70,7 @@ Owner commands (or just tap the buttons on each order):
 💡 *Customer test mode:* Start a message with # to test as a customer, e.g. *#hi*`;
 
 function list(orders, title) {
-  if (!orders.length) return `${title}: none.`;
+  if (!orders.length) return `📋 *${title}:* none right now. All caught up! ✅`;
   const paid = orders.filter(o => o.status !== STATUS.CANCELLED && o.status !== STATUS.AWAITING_PAYMENT);
   const sales = paid.reduce((t, o) => t + o.total, 0);
   const upiSales = paid.filter(o => o.payment === 'upi').reduce((t, o) => t + o.total, 0);
@@ -108,11 +109,20 @@ async function handle(msg) {
     if (m) { action = m[1].toLowerCase(); id = m[2]; }
   }
   if (!action) {
-    if (msg.buttonId === 'o:cmd:pending' || /^pending$/i.test(text)) {
+    // Check for pending orders commands: "pending", "pending orders", "open orders", "kya pending hai"
+    if (msg.buttonId === 'o:cmd:pending' || /^(pending(\s+orders?)?|open(\s+orders?)?|kya\s+pending\s+hai|baki\s+orders?)$/i.test(text)) {
       return tell(list(store.allOrders().filter(o => !store.FINAL.includes(o.status)), 'Open orders'));
     }
-    if (msg.buttonId === 'o:cmd:today' || /^orders?(\s+today)?$/i.test(text)) {
+    // Check for today's orders commands: "orders", "orders today", "today orders", "todays orders", "order list"
+    if (msg.buttonId === 'o:cmd:today' || /^(orders?(\s+today)?|today('?s)?\s+orders?|all\s+orders?|aaj\s+ke\s+orders?|order\s+list)$/i.test(text)) {
       return tell(list(store.todaysOrders(), "Today's orders"));
+    }
+    // Check if owner sent a direct order ID to view details: e.g. "BB1432" or "order BB1432"
+    const directId = /^(?:order\s+)?#?([A-Za-z]{2}\d{4}[A-Za-z]?)$/i.exec(text);
+    if (directId) {
+      const o = store.findOrder(directId[1]);
+      if (o) return tell(formatOrderCard(o));
+      return tell(`No order found with ID *${directId[1].toUpperCase()}*. Type *orders* to see today's list.`);
     }
     if (/^(hi+|hello+|hey+|namaste|help)$/i.test(text)) {
       return tell(HELP, [

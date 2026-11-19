@@ -180,7 +180,11 @@ test('owner: help, orders list, unknown id, and "#" test mode', async () => {
   let r = await t.text(t.OWNER, 'hello');
   assert.match(to(r.out, t.OWNER)[0].text, /Owner commands/);
   r = await t.text(t.OWNER, 'orders');
-  assert.match(to(r.out, t.OWNER)[0].text, /Today's orders \(5\)/);
+  assert.match(to(r.out, t.OWNER)[0].text, /Today's orders/);
+  r = await t.text(t.OWNER, 'pending orders');
+  assert.match(to(r.out, t.OWNER)[0].text, /Open \/ Pending Orders/);
+  r = await t.text(t.OWNER, 'today orders');
+  assert.match(to(r.out, t.OWNER)[0].text, /Today's orders/);
   r = await t.text(t.OWNER, 'paid BB9999');
   assert.match(to(r.out, t.OWNER)[0].text, /No order found/);
   r = await t.text(t.OWNER, '#1 paneer wrap');
