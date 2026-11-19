@@ -270,6 +270,7 @@ function paymentStep(from, s, lower, btn) {
 
 async function placeOrder(from, s, payment) {
   const lines = cartRows(s.cart);
+  if (!lines.length) return say(from, `Your cart is empty 🙂 To order, send something like ${EXAMPLE}, or type *menu*.`);
   const order = store.createOrder({
     phone: from, name: s.name || '', lines, total: sum(lines),
     fulfilment: s.fulfilment || 'pickup', address: s.address || null, note: s.note || null, payment,

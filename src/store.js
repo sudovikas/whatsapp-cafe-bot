@@ -69,7 +69,18 @@ const TTL = 2 * 60 * 60 * 1000;
 function blank() { return { step: 'IDLE', cart: [], pending: [], fulfilment: null, address: null, note: null, history: [], menuSent: false, at: Date.now() }; }
 function session(phone) {
   let s = sessions.get(phone);
-  if (!s || Date.now() - s.at > TTL) { s = blank(); sessions.set(phone, s); }
+  if (!s || Date.now() - s.at > TTL) {
+    if (sessions.size >= 2000) {
+      const now = Date.now();
+      for (const [k, v] of sessions.entries()) {
+        if (now - v.at > TTL) sessions.delete(k);
+        if (sessions.size < 1800) break;
+      }
+      if (sessions.size >= 2000) sessions.delete(sessions.keys().next().value);
+    }
+    s = blank();
+    sessions.set(phone, s);
+  }
   s.at = Date.now();
   return s;
 }

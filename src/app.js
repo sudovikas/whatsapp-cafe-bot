@@ -12,6 +12,46 @@ const dashboard = require('./dashboard');
 function createApp() {
   const app = express();
   app.disable('x-powered-by');
+
+  // Hardened Security Headers
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self' data:;");
+    res.setHeader('Permissions-Policy', 'geolocation=(), camera=(), microphone=()');
+    next();
+  });
+
+  // Fast In-Memory Rate Limiting
+  const makeRateLimiter = (windowMs, maxRequests) => {
+    const hits = new Map();
+    return (req, res, next) => {
+      const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+      const now = Date.now();
+      let rec = hits.get(ip);
+      if (!rec || now - rec.start > windowMs) {
+        rec = { start: now, count: 1 };
+        hits.set(ip, rec);
+      } else {
+        rec.count++;
+      }
+      if (hits.size > 2000) {
+        for (const [k, v] of hits.entries()) {
+          if (now - v.start > windowMs) hits.delete(k);
+          if (hits.size < 1500) break;
+        }
+      }
+      if (rec.count > maxRequests) {
+        return res.status(429).send('Too many requests. Please try again in a minute.');
+      }
+      next();
+    };
+  };
+
+  const adminLimiter = makeRateLimiter(60000, 40);
+  const qrLimiter = makeRateLimiter(60000, 60);
+
   app.use(express.json({ limit: '1mb', verify: (req, _res, buf) => { req.rawBody = buf; } }));
   app.use('/public', express.static(path.join(__dirname, '..', 'public'), { maxAge: '1h' }));
 
@@ -85,8 +125,11 @@ function createApp() {
   });
 
   // ---- UPI QR with the exact amount for one order ----
-  app.get('/qr/:file', async (req, res) => {
-    const order = store.findOrder(String(req.params.file).replace(/\.png$/i, ''));
+  // ---- UPI QR with the exact amount for one order ----
+  app.get('/qr/:file', qrLimiter, async (req, res) => {
+    const rawId = String(req.params.file || '').replace(/\.png$/i, '');
+    if (!/^[a-zA-Z0-9_-]{3,20}$/.test(rawId)) return res.sendStatus(400);
+    const order = store.findOrder(rawId);
     if (!order || !config.upiVpa) return res.sendStatus(404);
     const uri = `upi://pay?pa=${encodeURIComponent(config.upiVpa)}&pn=${encodeURIComponent(config.upiName)}&am=${order.total.toFixed(2)}&cu=INR&tn=${encodeURIComponent('Order ' + order.id)}`;
     const png = await QRCode.toBuffer(uri, { type: 'png', width: 720, margin: 3, errorCorrectionLevel: 'M' });
@@ -101,12 +144,18 @@ function createApp() {
     if (!crypto.timingSafeEqual(a, b)) return res.status(403).send('Forbidden');
     next();
   };
-  app.get(['/admin', '/orders'], admin, (req, res) => {
+  app.get(['/admin', '/orders'], adminLimiter, admin, (req, res) => {
     const key = String(req.query.key || req.query.secret || '');
     res.set('Cache-Control', 'no-store').send(dashboard.page(key));
   });
 
-  app.get('/admin/export-customers', admin, (_req, res) => {
+  const sanitizeCsv = s => {
+    const str = String(s ?? '');
+    // Neutralize spreadsheet formula injection (=, +, -, @, |, tab, CR)
+    return /^[=+@-|\t\r]/.test(str) ? `'${str.replace(/"/g, '""')}` : str.replace(/"/g, '""');
+  };
+
+  app.get('/admin/export-customers', adminLimiter, admin, (_req, res) => {
     const orders = store.allOrders();
     const map = new Map();
     for (const o of orders) {
@@ -120,7 +169,7 @@ function createApp() {
     }
     const csvRows = ['Phone,Name,TotalOrders,TotalSpend,LastOrderDate'];
     for (const c of map.values()) {
-      csvRows.push(`"${c.phone}","${c.name.replace(/"/g, '""')}",${c.orders},${c.total},"${store.istTime(c.lastOrder)} ${store.ist(new Date(c.lastOrder)).day}"`);
+      csvRows.push(`"${sanitizeCsv(c.phone)}","${sanitizeCsv(c.name)}",${c.orders},${c.total},"${store.istTime(c.lastOrder)} ${store.ist(new Date(c.lastOrder)).day}"`);
     }
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="customers.csv"');
